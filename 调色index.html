@@ -1,0 +1,814 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>色彩实验室 (Color Lab) - Pro AI Colorist</title>
+    
+    <!-- 引入 React 核心 -->
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+    
+    <!-- 引入 Babel -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js" crossorigin></script>
+    
+    <!-- 引入 Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- 引入 Lucide 图标库 (备用) -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+
+    <style>
+        /* 自定义滚动条样式 */
+        .scrollbar-hide::-webkit-scrollbar { display: none; }
+        .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
+        
+        .filter-scrollbar::-webkit-scrollbar { height: 6px; }
+        .filter-scrollbar::-webkit-scrollbar-track { background: rgba(255, 255, 255, 0.05); border-radius: 10px; margin: 0 20px; }
+        .filter-scrollbar::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.2); border-radius: 10px; cursor: pointer; transition: background 0.2s; }
+        .filter-scrollbar::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.4); }
+
+        body { background-color: #000; color: #d4d4d8; margin: 0; overflow: hidden; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; }
+        #root { width: 100vw; height: 100vh; }
+        
+        /* 动画定义 */
+        @keyframes glass-in { from { opacity: 0; transform: scale(0.95) translateY(10px); } to { opacity: 1; transform: scale(1) translateY(0); } }
+        .animate-glass-in { animation: glass-in 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
+        
+        .loader { width: 20px; height: 20px; border: 2px solid #fff; border-bottom-color: transparent; border-radius: 50%; display: inline-block; box-sizing: border-box; animation: rotation 1s linear infinite; }
+        @keyframes rotation { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+
+        /* Range Slider 样式优化 */
+        input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; height: 16px; width: 16px; border-radius: 50%; background: #fff; cursor: pointer; margin-top: -6px; box-shadow: 0 0 10px rgba(255,255,255,0.5); border: 2px solid #18181b; }
+        input[type=range]::-webkit-slider-runnable-track { width: 100%; height: 4px; cursor: pointer; background: #333; border-radius: 2px; }
+        input[type=range]:focus::-webkit-slider-thumb { border-color: #6366f1; transform: scale(1.1); }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        // 错误边界处理
+        window.onerror = function(message, source, lineno, colno, error) {
+            console.error("Global Error:", message, error);
+            return false;
+        };
+
+        const { useState, useEffect, useRef, useMemo, useCallback } = React;
+
+        // --- SVG 图标组件 (内联以确保零依赖) ---
+        const IconBase = ({ children, size = 24, strokeWidth = 2, className = "", ...props }) => (
+            <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round" className={className} {...props}>{children}</svg>
+        );
+
+        const Icons = {
+            Sun: (p) => <IconBase {...p}><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></IconBase>,
+            Contrast: (p) => <IconBase {...p}><circle cx="12" cy="12" r="10"/><path d="M12 18a6 6 0 0 0 0-12v12z"/></IconBase>,
+            Droplet: (p) => <IconBase {...p}><path d="M12 22a7 7 0 0 0 7-7c0-2-1-3.9-3-5.5s-3.5-4-4-6.5c-.5 2.5-2 4.9-4 6.5C6 11.1 5 13 5 15a7 7 0 0 0 7 7z"/></IconBase>,
+            MoveHorizontal: (p) => <IconBase {...p}><polyline points="18 8 22 12 18 16"/><polyline points="6 8 2 12 6 16"/><line x1="2" x2="22" y1="12" y2="12"/></IconBase>,
+            Aperture: (p) => <IconBase {...p}><circle cx="12" cy="12" r="10"/><path d="m14.31 8 5.74 9.94"/><path d="M9.69 8h11.48"/><path d="m7.38 12 5.74-9.94"/><path d="M9.69 16 3.95 6.06"/><path d="M14.31 16H2.83"/><path d="m16.62 12-5.74 9.94"/></IconBase>,
+            CloudFog: (p) => <IconBase {...p}><path d="M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242"/><path d="M16 17H7"/><path d="M17 21H9"/></IconBase>,
+            Upload: (p) => <IconBase {...p}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" x2="12" y1="3" y2="15"/></IconBase>,
+            Shuffle: (p) => <IconBase {...p}><path d="M2 18h1.4c1.3 0 2.5-.6 3.3-1.7l6.1-8.6c.7-1.1 2-1.7 3.3-1.7H22"/><path d="m18 2 4 4-4 4"/><path d="M2 6h1.4c1.3 0 2.5.6 3.3 1.7l1.2 1.7"/><path d="m12.1 12.6 1.2 1.7c.7 1.1 2 1.7 3.3 1.7H22"/><path d="m18 14 4 4-4 4"/></IconBase>,
+            Wand2: (p) => <IconBase {...p}><path d="m21.64 3.64-1.28-1.28a1.21 1.21 0 0 0-1.72 0L2.36 18.64a1.21 1.21 0 0 0 0 1.72l1.28 1.28a1.2 1.2 0 0 0 1.72 0L21.64 5.36a1.2 1.2 0 0 0 0-1.72Z"/><path d="m14 7 3 3"/><path d="M5 6v4"/><path d="M19 14v4"/><path d="M10 2v2"/><path d="M7 8H3"/><path d="M21 16h-4"/><path d="M11 3H9"/></IconBase>,
+            Sliders: (p) => <IconBase {...p}><line x1="4" x2="4" y1="21" y2="14"/><line x1="4" x2="4" y1="10" y2="3"/><line x1="12" x2="12" y1="21" y2="12"/><line x1="12" x2="12" y1="8" y2="3"/><line x1="20" x2="20" y1="21" y2="16"/><line x1="20" x2="20" y1="12" y2="3"/><line x1="2" x2="6" y1="14" y2="14"/><line x1="10" x2="14" y1="8" y2="8"/><line x1="18" x2="22" y1="16" y2="16"/></IconBase>,
+            Download: (p) => <IconBase {...p}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></IconBase>,
+            RotateCcw: (p) => <IconBase {...p}><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></IconBase>,
+            X: (p) => <IconBase {...p}><path d="M18 6 6 18"/><path d="m6 6 12 12"/></IconBase>,
+            Zap: (p) => <IconBase {...p}><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></IconBase>,
+            Check: (p) => <IconBase {...p}><polyline points="20 6 9 17 4 12"/></IconBase>,
+            Film: (p) => <IconBase {...p}><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><line x1="7" x2="7" y1="3" y2="21"/><line x1="17" x2="17" y1="3" y2="21"/><line x1="3" x2="21" y1="12" y2="12"/><line x1="3" x2="7" y1="7" y2="7"/><line x1="3" x2="7" y1="17" y2="17"/><line x1="17" x2="21" y1="7" y2="7"/><line x1="17" x2="21" y1="17" y2="17"/></IconBase>,
+            Thermometer: (p) => <IconBase {...p}><path d="M14 4v10.54a4 4 0 1 1-4 0V4a2 2 0 0 1 4 0Z"/></IconBase>,
+            Activity: (p) => <IconBase {...p}><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></IconBase>
+        };
+
+        const { Sun, Contrast, Droplet, MoveHorizontal, Aperture, CloudFog, Upload, Shuffle, Wand2, Sliders, Download, RotateCcw, X, Zap, Check, Film, Thermometer, Activity } = Icons;
+
+        // --- 核心数学：Lαβ 颜色空间转换 (用于Reinhard仿色) ---
+        const rgb2lab = (r, g, b) => {
+            let R = r / 255, G = g / 255, B = b / 255;
+            R = (R > 0.04045) ? Math.pow((R + 0.055) / 1.055, 2.4) : R / 12.92;
+            G = (G > 0.04045) ? Math.pow((G + 0.055) / 1.055, 2.4) : G / 12.92;
+            B = (B > 0.04045) ? Math.pow((B + 0.055) / 1.055, 2.4) : B / 12.92;
+            let X = R * 0.4124 + G * 0.3576 + B * 0.1805;
+            let Y = R * 0.2126 + G * 0.7152 + B * 0.0722;
+            let Z = R * 0.0193 + G * 0.1192 + B * 0.9505;
+            X /= 0.95047; Y /= 1.00000; Z /= 1.08883;
+            X = (X > 0.008856) ? Math.pow(X, 1/3) : (7.787 * X) + (16/116);
+            Y = (Y > 0.008856) ? Math.pow(Y, 1/3) : (7.787 * Y) + (16/116);
+            Z = (Z > 0.008856) ? Math.pow(Z, 1/3) : (7.787 * Z) + (16/116);
+            return [(116 * Y) - 16, 500 * (X - Y), 200 * (Y - Z)];
+        };
+
+        const lab2rgb = (l, a, b) => {
+            let Y = (l + 16) / 116;
+            let X = a / 500 + Y;
+            let Z = Y - b / 200;
+            const cube = (v) => (v * v * v > 0.008856) ? v * v * v : (v - 16/116) / 7.787;
+            X = cube(X) * 0.95047; Y = cube(Y) * 1.00000; Z = cube(Z) * 1.08883;
+            let R = X * 3.2406 + Y * -1.5372 + Z * -0.4986;
+            let G = X * -0.9689 + Y * 1.8758 + Z * 0.0415;
+            let B = X * 0.0557 + Y * -0.2040 + Z * 1.0570;
+            const gamma = (v) => (v > 0.0031308) ? (1.055 * Math.pow(v, 1/2.4) - 0.055) : 12.92 * v;
+            return [
+                Math.min(255, Math.max(0, Math.round(gamma(R) * 255))),
+                Math.min(255, Math.max(0, Math.round(gamma(G) * 255))),
+                Math.min(255, Math.max(0, Math.round(gamma(B) * 255)))
+            ];
+        };
+
+        // --- 全局配置 ---
+
+        const getCSS = (f) => {
+            // 色温模拟 (简化版)
+            const tempHue = f.temp > 0 ? 30 : 210; 
+            const tempSepia = Math.abs(f.temp) * 0.5; 
+            // 色调偏移 (Tint) - 绿/洋红轴，这里用 hue-rotate 微调模拟
+            const tintShift = f.tint; 
+            
+            return `brightness(${f.brightness}%) contrast(${f.contrast}%) saturate(${f.saturate}%) hue-rotate(${f.hueRotate + tintShift}deg) grayscale(${f.grayscale}%) sepia(${Math.max(f.sepia, tempSepia)}%) blur(${f.blur}px)`;
+        };
+
+        // --- UI 组件 ---
+        const FilterCard = ({ style, isActive, onClick, imageSrc }) => (
+            <button onClick={onClick} className={`relative group min-w-[70px] flex flex-col items-center gap-2 transition-all duration-300 ${isActive ? 'scale-105 opacity-100' : 'opacity-60 hover:opacity-100'}`} title={style.name}>
+                <div className={`w-16 h-20 rounded-lg overflow-hidden bg-zinc-900 border-2 transition-colors ${isActive ? 'border-indigo-500 shadow-[0_0_15px_rgba(99,102,241,0.5)]' : 'border-transparent group-hover:border-zinc-700'}`}>
+                    <img src={style.previewSrc || imageSrc} className="w-full h-full object-cover" style={{ filter: style.previewSrc ? 'none' : (style.cssFilter || 'none') }} alt={style.name} loading="lazy" />
+                </div>
+                <span className={`text-[10px] font-medium tracking-wide w-20 truncate ${isActive ? 'text-indigo-400' : 'text-zinc-500'}`}>{style.name}</span>
+            </button>
+        );
+
+        const ToolButton = ({ active, icon: Icon, onClick, label }) => (
+            <button onClick={onClick} className={`flex flex-col items-center gap-2 transition-all min-w-[60px] ${active ? 'text-white' : 'text-zinc-500 hover:text-zinc-300'}`}>
+                <div className={`p-2 rounded-full transition-all ${active ? 'bg-zinc-800 ring-1 ring-zinc-600' : ''}`}>
+                    <Icon size={20} strokeWidth={1.5} />
+                </div>
+                <span className="text-[10px] tracking-wider uppercase font-medium">{label}</span>
+            </button>
+        );
+
+        const filterTools = [
+            { id: 'brightness', label: '亮度', icon: Sun, min: 0, max: 200 },
+            { id: 'contrast', label: '对比度', icon: Contrast, min: 0, max: 200 },
+            { id: 'saturate', label: '饱和度', icon: Droplet, min: 0, max: 200 },
+            { id: 'temp', label: '色温', icon: Thermometer, min: -100, max: 100 }, 
+            { id: 'tint', label: '色调', icon: Wand2, min: -100, max: 100 }, 
+            { id: 'hueRotate', label: 'HUE', icon: MoveHorizontal, min: 0, max: 360, suffix: '°' },
+            { id: 'sepia', label: '复古', icon: Aperture, min: 0, max: 100 },
+            { id: 'blur', label: '模糊', icon: CloudFog, min: 0, max: 20, suffix: 'px' },
+        ];
+
+        // --- 核心算法：Reinhard 色彩迁移分析 ---
+        const analyzeLabStats = (img, canvas) => {
+            const size = 200; 
+            canvas.width = size; canvas.height = (img.height / img.width) * size;
+            const ctx = canvas.getContext('2d', { willReadFrequently: true });
+            ctx.drawImage(img, 0, 0, size, canvas.height);
+            const data = ctx.getImageData(0, 0, size, canvas.height).data;
+            
+            let lSum=0, aSum=0, bSum=0;
+            let pixels = []; 
+            let maxL = 0; 
+            let pixelCount = data.length / 4;
+            
+            // 色板提取辅助
+            const colorMap = {};
+            
+            for(let i=0; i<data.length; i+=4) {
+                const r = data[i], g = data[i+1], b = data[i+2];
+                const lab = rgb2lab(r, g, b);
+                lSum += lab[0]; aSum += lab[1]; bSum += lab[2];
+                if (lab[0] > maxL) maxL = lab[0];
+                pixels.push(lab);
+                
+                if (i % 64 === 0) {
+                    const qr = Math.round(r/32)*32;
+                    const qg = Math.round(g/32)*32;
+                    const qb = Math.round(b/32)*32;
+                    const key = `${qr},${qg},${qb}`;
+                    colorMap[key] = (colorMap[key] || 0) + 1;
+                }
+            }
+            
+            const palette = Object.entries(colorMap).sort((a,b) => b[1] - a[1]).slice(0, 5).map(e => `rgb(${e[0]})`);
+            const means = { l: lSum/pixelCount, a: aSum/pixelCount, b: bSum/pixelCount };
+
+            let lVar=0, aVar=0, bVar=0;
+            for(let i=0; i<pixelCount; i++) {
+                lVar += Math.pow(pixels[i][0] - means.l, 2);
+                aVar += Math.pow(pixels[i][1] - means.a, 2);
+                bVar += Math.pow(pixels[i][2] - means.b, 2);
+            }
+
+            return {
+                mean: means,
+                std: { l: Math.sqrt(lVar/pixelCount), a: Math.sqrt(aVar/pixelCount), b: Math.sqrt(bVar/pixelCount) },
+                maxL: maxL,
+                palette: palette
+            };
+        };
+
+        // --- Reinhard 仿色预览生成器 ---
+        const generateMatchPreview = async (targetSrc, targetStats, refStats, intensity = 1.0) => {
+            return new Promise((resolve) => {
+                const img = new Image();
+                img.crossOrigin = "Anonymous";
+                img.src = targetSrc;
+                img.onload = () => {
+                    const canvas = document.createElement('canvas');
+                    const size = 400; 
+                    canvas.width = size;
+                    canvas.height = (img.height / img.width) * size;
+                    const ctx = canvas.getContext('2d');
+                    ctx.drawImage(img, 0, 0, size, canvas.height);
+                    const imageData = ctx.getImageData(0, 0, size, canvas.height);
+                    const data = imageData.data;
+
+                    const { mean: tM, std: tS, maxL: tMaxL } = targetStats;
+                    const { mean: rM, std: rS } = refStats;
+
+                    // 增益限制器 (避免过度曝光)
+                    let lScale = rS.l / tS.l;
+                    if (tMaxL > 90 && lScale > 1.2) lScale = 1.0 + (lScale - 1.0) * 0.5;
+
+                    const clipStd = (val) => Math.max(0.2, Math.min(5.0, val));
+                    lScale = clipStd(lScale);
+                    const aScale = clipStd(rS.a / tS.a);
+                    const bScale = clipStd(rS.b / tS.b);
+
+                    const knee = 90; 
+                    const softClip = (val) => {
+                        if (val <= knee) return val;
+                        return knee + (100 - knee) * Math.tanh((val - knee) / (100 - knee));
+                    };
+
+                    for(let i=0; i<data.length; i+=4) {
+                        const lab = rgb2lab(data[i], data[i+1], data[i+2]);
+                        
+                        let l = (lab[0] - tM.l) * lScale + rM.l;
+                        let a = (lab[1] - tM.a) * aScale + rM.a;
+                        let b = (lab[2] - tM.b) * bScale + rM.b;
+
+                        l = softClip(l);
+
+                        l = lab[0] * (1 - intensity) + l * intensity;
+                        a = lab[1] * (1 - intensity) + a * intensity;
+                        b = lab[2] * (1 - intensity) + b * intensity;
+
+                        const rgb = lab2rgb(l, a, b);
+                        data[i] = rgb[0]; data[i+1] = rgb[1]; data[i+2] = rgb[2];
+                    }
+
+                    ctx.putImageData(imageData, 0, 0);
+                    resolve(canvas.toDataURL());
+                };
+            });
+        };
+
+        // --- LUT 生成器 ---
+        const generateLUTReinhard = async (filename, targetStats, refStats, intensity = 1.0, onComplete) => {
+            const size = 33; 
+            const canvas = document.createElement('canvas');
+            canvas.width = size * size; canvas.height = size; 
+            const ctx = canvas.getContext('2d', { willReadFrequently: true });
+            const imageData = ctx.createImageData(size * size, size);
+            const data = imageData.data;
+
+            const { mean: tM, std: tS, maxL: tMaxL } = targetStats;
+            const { mean: rM, std: rS } = refStats;
+
+            let lScale = rS.l / tS.l;
+            if (tMaxL > 90 && lScale > 1.2) lScale = 1.0 + (lScale - 1.0) * 0.5;
+
+            const clipStd = (val) => Math.max(0.2, Math.min(5.0, val));
+            lScale = clipStd(lScale);
+            const aScale = clipStd(rS.a / tS.a);
+            const bScale = clipStd(rS.b / tS.b);
+
+            const knee = 90; 
+            const softClip = (val) => {
+                if (val <= knee) return val;
+                return knee + (100 - knee) * Math.tanh((val - knee) / (100 - knee));
+            };
+
+            let index = 0;
+            for (let b = 0; b < size; b++) {
+                for (let g = 0; g < size; g++) {
+                    for (let r = 0; r < size; r++) {
+                        const R = Math.round((r / (size - 1)) * 255);
+                        const G = Math.round((g / (size - 1)) * 255);
+                        const B = Math.round((b / (size - 1)) * 255);
+
+                        const lab = rgb2lab(R, G, B);
+
+                        let l = (lab[0] - tM.l) * lScale + rM.l;
+                        let a = (lab[1] - tM.a) * aScale + rM.a;
+                        let bb = (lab[2] - tM.b) * bScale + rM.b;
+
+                        l = softClip(l);
+
+                        l = lab[0] * (1 - intensity) + l * intensity;
+                        a = lab[1] * (1 - intensity) + a * intensity;
+                        bb = lab[2] * (1 - intensity) + bb * intensity;
+
+                        const rgb = lab2rgb(l, a, bb);
+
+                        data[index] = rgb[0]; data[index+1] = rgb[1]; data[index+2] = rgb[2]; data[index+3] = 255;
+                        index += 4;
+                    }
+                }
+            }
+
+            let cubeContent = `# Generated by ColorLab Pro\nTITLE "ColorLab_${filename}"\nLUT_3D_SIZE ${size}\nDOMAIN_MIN 0.0 0.0 0.0\nDOMAIN_MAX 1.0 1.0 1.0\n\n`;
+            for (let i = 0; i < data.length; i += 4) {
+                cubeContent += `${(data[i]/255).toFixed(6)} ${(data[i+1]/255).toFixed(6)} ${(data[i+2]/255).toFixed(6)}\n`;
+            }
+            
+            const blob = new Blob([cubeContent], { type: 'text/plain' });
+            const url = URL.createObjectURL(blob);
+            onComplete(url);
+        };
+
+        // --- 核心风格库定义 ---
+        const STYLE_PRESETS = {
+            standard: [
+                // 胶片感
+                { name: 'Kodak Gold', filters: { brightness: 105, contrast: 110, saturate: 120, hueRotate: 0, sepia: 20, grayscale: 0, blur: 0, temp: 15, tint: 0 } },
+                { name: 'Fuji Pro', filters: { brightness: 110, contrast: 105, saturate: 110, hueRotate: 350, sepia: 5, grayscale: 0, blur: 0, temp: -5, tint: 10 } },
+                { name: 'Cine Teal', filters: { brightness: 95, contrast: 125, saturate: 90, hueRotate: 0, sepia: 30, grayscale: 0, blur: 0, temp: -15, tint: 0 } },
+                { name: 'Warm Vintage', filters: { brightness: 100, contrast: 90, saturate: 85, hueRotate: 0, sepia: 40, grayscale: 0, blur: 0, temp: 20, tint: 0 } },
+                
+                // 风格化
+                { name: 'Bleach Bypass', filters: { brightness: 95, contrast: 160, saturate: 40, hueRotate: 0, sepia: 10, grayscale: 0, blur: 0, temp: 0, tint: 0 } },
+                { name: 'Cyberpunk', filters: { brightness: 105, contrast: 120, saturate: 180, hueRotate: 15, sepia: 0, grayscale: 0, blur: 0, temp: -10, tint: 15 } },
+                { name: 'Matte Black', filters: { brightness: 120, contrast: 85, saturate: 0, hueRotate: 0, sepia: 0, grayscale: 100, blur: 0, temp: 0, tint: 0 } },
+                { name: 'Dreamy', filters: { brightness: 115, contrast: 90, saturate: 130, hueRotate: 345, sepia: 10, grayscale: 0, blur: 0.5, temp: 5, tint: 5 } },
+                
+                // 单色与其他
+                { name: 'Noir HighCon', filters: { brightness: 90, contrast: 150, saturate: 0, hueRotate: 0, sepia: 0, grayscale: 100, blur: 0, temp: 0, tint: 0 } },
+                { name: 'Sepia Print', filters: { brightness: 95, contrast: 110, saturate: 60, hueRotate: 0, sepia: 80, grayscale: 0, blur: 0, temp: 10, tint: 0 } },
+                { name: 'Cold Blue', filters: { brightness: 95, contrast: 115, saturate: 100, hueRotate: 180, sepia: 20, grayscale: 0, blur: 0, temp: -30, tint: 0 } },
+                { name: 'Faded', filters: { brightness: 115, contrast: 80, saturate: 80, hueRotate: 0, sepia: 15, grayscale: 0, blur: 0, temp: 0, tint: 0 } }
+            ],
+            log: [
+                // Log 还原
+                { name: 'Rec.709 Std', filters: { brightness: 95, contrast: 135, saturate: 145, hueRotate: 0, sepia: 0, grayscale: 0, blur: 0, temp: 0, tint: 0 } },
+                { name: 'Vivid Pop', filters: { brightness: 92, contrast: 145, saturate: 165, hueRotate: 0, sepia: 0, grayscale: 0, blur: 0, temp: 0, tint: 0 } },
+                { name: 'Cinematic Log', filters: { brightness: 90, contrast: 130, saturate: 125, hueRotate: 0, sepia: 15, grayscale: 0, blur: 0, temp: 5, tint: 0 } },
+                { name: 'Soft Portrait', filters: { brightness: 105, contrast: 115, saturate: 125, hueRotate: 0, sepia: 5, grayscale: 0, blur: 0.5, temp: 0, tint: 0 } },
+                
+                // Log 风格化
+                { name: 'Log ➜ Teal', filters: { brightness: 90, contrast: 140, saturate: 110, hueRotate: 0, sepia: 25, grayscale: 0, blur: 0, temp: -15, tint: 0 } },
+                { name: 'Log ➜ BW', filters: { brightness: 95, contrast: 150, saturate: 0, hueRotate: 0, sepia: 0, grayscale: 100, blur: 0, temp: 0, tint: 0 } },
+                { name: 'Log ➜ Warm', filters: { brightness: 100, contrast: 125, saturate: 130, hueRotate: 0, sepia: 30, grayscale: 0, blur: 0, temp: 20, tint: 0 } },
+                { name: 'Log ➜ Bleach', filters: { brightness: 95, contrast: 170, saturate: 60, hueRotate: 0, sepia: 10, grayscale: 0, blur: 0, temp: 0, tint: 0 } }
+            ]
+        };
+
+        // --- 风格生成逻辑 (升级版) ---
+        const generateStylesFromStatsFull = (stats, randomize, isLog) => {
+            const styles = [];
+            const suffix = `_${Date.now()}`;
+            const pool = isLog ? STYLE_PRESETS.log : STYLE_PRESETS.standard;
+            
+            if (randomize) {
+                // 随机洗牌算法
+                const shuffled = [...pool].sort(() => 0.5 - Math.random());
+                const selected = shuffled.slice(0, 5); // 选取5个
+                
+                selected.forEach((preset, i) => {
+                    // 在预设基础上增加微小随机扰动，确保每次不一样
+                    const f = { ...preset.filters };
+                    const rnd = (range) => Math.floor(Math.random() * range) - range/2;
+                    
+                    f.brightness += rnd(6);
+                    f.contrast += rnd(6);
+                    f.saturate += rnd(10);
+                    
+                    styles.push({
+                        id: `preset_${i}${suffix}`,
+                        name: preset.name, // 保持原始名称或加后缀
+                        cssFilter: getCSS(f),
+                        filters: f
+                    });
+                });
+            } else {
+                // 初始加载固定显示前5个
+                const initial = pool.slice(0, 5);
+                initial.forEach((preset, i) => {
+                    styles.push({
+                        id: `init_${i}${suffix}`,
+                        name: preset.name,
+                        cssFilter: getCSS(preset.filters),
+                        filters: preset.filters
+                    });
+                });
+            }
+            return styles;
+        };
+
+        const AnalysisPanel = ({ data, onClose }) => {
+            if (!data) return null;
+            return (
+                <div className="absolute top-20 right-6 w-80 bg-zinc-900/95 backdrop-blur-xl border border-zinc-700/50 rounded-2xl shadow-2xl p-5 text-zinc-300 animate-glass-in z-40">
+                    <div className="flex justify-between items-center mb-4 border-b border-zinc-800 pb-2">
+                        <div className="flex items-center gap-2">
+                            <Activity size={16} className="text-indigo-400" />
+                            <span className="text-xs font-bold tracking-widest uppercase text-white">Reinhard 分析</span>
+                        </div>
+                        <button onClick={onClose} className="text-zinc-500 hover:text-white"><X size={16} /></button>
+                    </div>
+                    <div className="space-y-3 text-[11px] font-mono leading-relaxed">
+                        <div className="p-2 bg-indigo-900/30 rounded border border-indigo-500/20 mb-3">
+                            <span className="text-indigo-300 font-bold block mb-1">Lαβ 空间迁移</span>
+                            已提取参考图的亮度(L)、红绿(A)、黄蓝(B)统计特征，并映射至目标图。
+                        </div>
+                        {data.desc && data.desc.map((line, i) => (
+                            <div key={i} className={`p-1 ${line.startsWith('•') ? 'pl-3 text-zinc-400' : 'text-indigo-300 font-bold mt-2'}`}>{line}</div>
+                        ))}
+                    </div>
+
+                    {/* Palette Visualization */}
+                    <div className="mt-4">
+                         <div className="flex justify-between text-[10px] text-zinc-500 mb-2">
+                            <span>原片色调</span>
+                            <span>参考色调</span>
+                         </div>
+                         <div className="flex justify-between gap-4">
+                            <div className="flex gap-1">
+                                {data.targetPalette && data.targetPalette.map((c, i) => (
+                                    <div key={i} className="w-6 h-6 rounded-full border border-white/10" style={{backgroundColor: c}}></div>
+                                ))}
+                            </div>
+                            <div className="w-[1px] bg-zinc-700"></div>
+                            <div className="flex gap-1 justify-end">
+                                {data.refPalette && data.refPalette.map((c, i) => (
+                                    <div key={i} className="w-6 h-6 rounded-full border border-white/10" style={{backgroundColor: c}}></div>
+                                ))}
+                            </div>
+                         </div>
+                    </div>
+
+                    <div className="mt-4 pt-3 border-t border-zinc-800 flex items-center gap-2 text-xs text-green-400">
+                        <Check size={14} />
+                        <span>色彩空间对齐完成</span>
+                    </div>
+                </div>
+            );
+        };
+
+        function App() {
+            // --- State ---
+            const [targetSrc, setTargetSrc] = useState("https://images.unsplash.com/photo-1493612276216-ee3925520721?q=80&w=1000&auto=format&fit=crop");
+            const [referenceSrc, setReferenceSrc] = useState(null);
+            
+            const [isAnalyzing, setIsAnalyzing] = useState(false);
+            const [matchResult, setMatchResult] = useState(null); 
+            const [showAnalysis, setShowAnalysis] = useState(false);
+            const [targetStats, setTargetStats] = useState(null); 
+            const [refStats, setRefStats] = useState(null);
+            
+            const [gradingMode, setGradingMode] = useState('presets'); 
+            const [activeFilter, setActiveFilter] = useState('brightness'); 
+            const [suggestedStyles, setSuggestedStyles] = useState([]);
+            const [filters, setFilters] = useState({ brightness: 100, contrast: 100, saturate: 100, hueRotate: 0, grayscale: 0, sepia: 0, blur: 0, temp: 0, tint: 0 });
+            const [filterIntensity, setFilterIntensity] = useState(100);
+            const [selectedStyle, setSelectedStyle] = useState(null); 
+            const [previewCSS, setPreviewCSS] = useState({});
+            
+            const [matchPreviewSrc, setMatchPreviewSrc] = useState(null);
+            
+            const [notification, setNotification] = useState(null);
+            const [isLogMode, setIsLogMode] = useState(false); // Log 模式开关
+
+            const canvasRef = useRef(null);
+            const scrollContainerRef = useRef(null);
+            const fileInputTargetRef = useRef(null);
+            const fileInputRefRef = useRef(null);
+
+            const currentTool = filterTools.find(t => t.id === activeFilter);
+
+            // --- Effects ---
+            
+            // 初始化或切换图片时重新生成建议风格
+            useEffect(() => { analyzeAndGenerate(targetSrc, isLogMode); }, [isLogMode]); 
+            
+            // 自动滚动到建议列表开头
+            useEffect(() => { if (scrollContainerRef.current) scrollContainerRef.current.scrollLeft = 0; }, [suggestedStyles]);
+
+            const showNotification = (msg) => { setNotification(msg); setTimeout(() => setNotification(null), 2500); };
+            
+            const resetFilters = () => {
+                setFilters({ brightness: 100, contrast: 100, saturate: 100, hueRotate: 0, grayscale: 0, sepia: 0, blur: 0, temp: 0, tint: 0 });
+                setPreviewCSS({});
+                setSelectedStyle(null);
+                setFilterIntensity(100);
+                setMatchPreviewSrc(null);
+                showNotification('已重置');
+            };
+
+            const handleUpload = (type, e) => {
+                const file = e.target.files[0];
+                if (file) {
+                    const url = URL.createObjectURL(file);
+                    if (type === 'target') {
+                        setTargetSrc(url);
+                        resetFilters();
+                        analyzeAndGenerate(url, isLogMode); 
+                        showNotification("左图已更新");
+                    } else {
+                        setReferenceSrc(url);
+                        showNotification("参考图已加载，点击⚡️仿制");
+                    }
+                }
+            };
+
+            const toggleLogMode = () => {
+                const newMode = !isLogMode;
+                setIsLogMode(newMode);
+                // 切换后立即重新生成风格
+                analyzeAndGenerate(targetSrc, newMode);
+                showNotification(newMode ? "LOG 还原模式已开启 (生成还原 LUT)" : "标准模式已开启 (生成创意 LUT)");
+            };
+
+            const analyzeAndGenerate = (src, logMode) => {
+                const img = new Image();
+                img.crossOrigin = "Anonymous";
+                img.src = src;
+                img.onload = () => {
+                    const stats = analyzeLabStats(img, canvasRef.current);
+                    setTargetStats(stats);
+                    const styles = generateStylesFromStatsFull({}, false, logMode);
+                    setSuggestedStyles(styles);
+                    // 默认不选中任何风格，保持原图，直到用户点击
+                };
+            };
+
+            const handleMatch = () => {
+                if (!referenceSrc || !targetStats) return;
+                setIsAnalyzing(true);
+                
+                const imgR = new Image(); 
+                imgR.crossOrigin = "Anonymous"; 
+                imgR.src = referenceSrc;
+                
+                imgR.onload = () => {
+                    const rStats = analyzeLabStats(imgR, canvasRef.current);
+                    setRefStats(rStats);
+                    
+                    generateMatchPreview(targetSrc, targetStats, rStats).then(previewUrl => {
+                        setMatchPreviewSrc(previewUrl);
+                        
+                        const matchStyle = {
+                            id: `match_${Date.now()}`,
+                            name: 'Reinhard 仿色',
+                            previewSrc: previewUrl, 
+                            isReinhard: true 
+                        };
+                        // 插入到列表最前面
+                        setSuggestedStyles(prev => [matchStyle, ...prev]); 
+                        applyStyle(matchStyle);
+
+                        setMatchResult({
+                            desc: [
+                                `• 亮度偏移: ${(rStats.mean.l - targetStats.mean.l).toFixed(2)}`,
+                                `• 色彩偏移 A: ${(rStats.mean.a - targetStats.mean.a).toFixed(2)}`,
+                                `• 色彩偏移 B: ${(rStats.mean.b - targetStats.mean.b).toFixed(2)}`
+                            ],
+                            targetPalette: targetStats.palette,
+                            refPalette: rStats.palette
+                        });
+                        
+                        setIsAnalyzing(false);
+                        setShowAnalysis(true);
+                        showNotification("Lαβ 空间色彩迁移完成");
+                    });
+                };
+            };
+
+            const handleRefreshStyles = () => {
+                const newStyles = generateStylesFromStatsFull({}, true, isLogMode);
+                setSuggestedStyles(prev => [...prev, ...newStyles]);
+                showNotification("已生成 5 种新风格");
+            };
+
+            const applyStyle = (style) => {
+                setSelectedStyle(style);
+                setFilterIntensity(100);
+                
+                if (style.isReinhard) {
+                    setMatchPreviewSrc(style.previewSrc);
+                    setFilters({ brightness: 100, contrast: 100, saturate: 100, hueRotate: 0, grayscale: 0, sepia: 0, blur: 0, temp: 0, tint: 0 });
+                    setPreviewCSS({});
+                } else {
+                    setMatchPreviewSrc(null); 
+                    setFilters(style.filters);
+                    setPreviewCSS({ filter: style.cssFilter || getCSS(style.filters) });
+                }
+            };
+
+            const handleIntensityChange = (e) => {
+                const val = Number(e.target.value);
+                setFilterIntensity(val);
+                if (!selectedStyle) return;
+
+                const ratio = val / 100;
+
+                if (selectedStyle.isReinhard && targetStats && refStats) {
+                     generateMatchPreview(targetSrc, targetStats, refStats, ratio).then(previewUrl => {
+                        setMatchPreviewSrc(previewUrl);
+                     });
+                } else {
+                    const base = { brightness: 100, contrast: 100, saturate: 100, hueRotate: 0, grayscale: 0, sepia: 0, blur: 0, temp: 0, tint: 0 };
+                    const target = selectedStyle.filters;
+                    const newFilters = {};
+                    for(let key in base) newFilters[key] = base[key] + (target[key] - base[key]) * ratio;
+                    setFilters(newFilters);
+                    setPreviewCSS({ filter: getCSS(newFilters) });
+                }
+            };
+
+            const handleDownload = () => {
+                if (selectedStyle && selectedStyle.isReinhard) {
+                    generateLUTReinhard("AI_Match", targetStats, refStats, filterIntensity/100, (url) => {
+                         const link = document.createElement('a');
+                         link.download = `ColorLab_Reinhard_Match.cube`;
+                         link.href = url;
+                         link.click();
+                         showNotification(`已导出 3D LUT (Safe)`);
+                    });
+                } else {
+                    showNotification("导出标准 LUT...");
+                    const basicCanvas = document.createElement('canvas');
+                    basicCanvas.width = 33*33; basicCanvas.height = 33;
+                    const bCtx = basicCanvas.getContext('2d');
+                    const bImgData = bCtx.createImageData(33*33, 33);
+                    let idx = 0;
+                    for(let b=0;b<33;b++){
+                        for(let g=0;g<33;g++){
+                            for(let r=0;r<33;r++){
+                                bImgData.data[idx++] = Math.round(r/32*255);
+                                bImgData.data[idx++] = Math.round(g/32*255);
+                                bImgData.data[idx++] = Math.round(b/32*255);
+                                bImgData.data[idx++] = 255;
+                            }
+                        }
+                    }
+                    bCtx.putImageData(bImgData, 0, 0);
+                    const tempC = document.createElement('canvas');
+                    tempC.width = 33*33; tempC.height = 33;
+                    const tCtx = tempC.getContext('2d');
+                    tCtx.filter = previewCSS.filter || 'none';
+                    tCtx.drawImage(basicCanvas, 0, 0);
+                    const fData = tCtx.getImageData(0,0,33*33,33).data;
+                    let content = `TITLE "ColorLab_Preset"\nLUT_3D_SIZE 33\nDOMAIN_MIN 0.0 0.0 0.0\nDOMAIN_MAX 1.0 1.0 1.0\n\n`;
+                    for(let i=0; i<fData.length; i+=4) content += `${(fData[i]/255).toFixed(6)} ${(fData[i+1]/255).toFixed(6)} ${(fData[i+2]/255).toFixed(6)}\n`;
+                    const url = URL.createObjectURL(new Blob([content], {type: 'text/plain'}));
+                    const link = document.createElement('a');
+                    link.download = `ColorLab_Preset.cube`;
+                    link.href = url;
+                    link.click();
+                }
+            };
+
+            return (
+                <div className="h-screen w-screen bg-black text-zinc-300 font-sans flex flex-col overflow-hidden relative">
+                    <canvas ref={canvasRef} style={{ display: 'none' }} />
+                    <input type="file" ref={fileInputTargetRef} onChange={(e) => handleUpload('target', e)} className="hidden" accept="image/*" />
+                    <input type="file" ref={fileInputRefRef} onChange={(e) => handleUpload('reference', e)} className="hidden" accept="image/*" />
+
+                    {showAnalysis && <AnalysisPanel data={matchResult || analysisData} onClose={() => setShowAnalysis(false)} />}
+
+                    <header className="fixed top-0 left-0 w-full z-50 flex items-center justify-between px-6 py-6 pointer-events-none bg-gradient-to-b from-black/80 to-transparent">
+                        <div className="pointer-events-auto flex items-center gap-2 opacity-80 hover:opacity-100 transition-opacity cursor-pointer">
+                            <div className="w-2 h-2 rounded-full bg-white"></div>
+                            <span className="text-xs font-bold tracking-[0.2em] text-white">COLOR LAB <span className="text-indigo-500">PRO</span></span>
+                        </div>
+                    </header>
+
+                    <main className="flex-1 flex items-center justify-center overflow-hidden bg-black px-4 relative">
+                        <div className={`flex w-full h-full gap-4 transition-all duration-500 pb-48 pt-16 ${referenceSrc ? 'justify-between' : 'justify-center'}`}>
+                            
+                            {/* Target Image Area */}
+                            <div className={`relative flex flex-col items-center justify-center ${referenceSrc ? 'w-1/2' : 'w-full max-w-4xl'}`}>
+                                <div className="relative group w-full h-full flex items-center justify-center">
+                                    <img 
+                                        src={matchPreviewSrc || targetSrc} 
+                                        className="max-w-full max-h-full object-contain shadow-2xl transition-all" 
+                                        style={matchPreviewSrc ? {} : previewCSS} 
+                                    />
+                                    
+                                    {/* Action Buttons on Target Image */}
+                                    <div className="absolute top-4 left-4 opacity-0 group-hover:opacity-100 transition-opacity flex gap-2">
+                                        <button onClick={() => fileInputTargetRef.current.click()} className="p-2 bg-black/60 rounded-full text-white hover:bg-zinc-700 backdrop-blur-md" title="更换图片"><Upload size={16}/></button>
+                                        <button 
+                                            onClick={toggleLogMode} 
+                                            className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-[10px] font-bold tracking-wider transition-colors backdrop-blur-md border ${isLogMode ? 'bg-indigo-600/80 border-indigo-500 text-white' : 'bg-black/60 border-zinc-700 text-zinc-400 hover:text-white'}`}
+                                            title={isLogMode ? "关闭 Log 还原模式" : "开启 Log 还原模式"}
+                                        >
+                                            <Film size={12} /> {isLogMode ? 'LOG ON' : 'LOG OFF'}
+                                        </button>
+                                    </div>
+                                    
+                                    {/* Indicator for Log Mode */}
+                                    {isLogMode && (
+                                        <div className="absolute top-4 right-4 bg-indigo-600/90 text-white text-[9px] font-bold px-2 py-1 rounded shadow-lg backdrop-blur-sm pointer-events-none">
+                                            REC.709 MODE
+                                        </div>
+                                    )}
+                                </div>
+                                <span className="absolute bottom-0 text-[10px] uppercase tracking-widest bg-black/50 px-2 py-1 rounded text-white/50 backdrop-blur-sm">Source / Graded</span>
+                            </div>
+
+                            {/* Center Action Button (Match) */}
+                            {referenceSrc && (
+                                <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-20 animate-glass-in">
+                                    <button onClick={handleMatch} disabled={isAnalyzing} className="w-14 h-14 bg-white text-black rounded-full flex items-center justify-center shadow-[0_0_30px_rgba(255,255,255,0.3)] hover:scale-110 transition-transform active:scale-95 group">
+                                        {isAnalyzing ? <div className="loader"></div> : <Zap size={24} fill="currentColor" className="group-hover:text-indigo-600 transition-colors" />}
+                                    </button>
+                                </div>
+                            )}
+
+                            {/* Reference Image Area */}
+                            {referenceSrc ? (
+                                <div className="w-1/2 relative flex flex-col items-center justify-center border-l border-zinc-900 pl-4">
+                                    <div className="relative group w-full h-full flex items-center justify-center">
+                                        <img src={referenceSrc} className="max-w-full max-h-full object-contain opacity-80" />
+                                        <div className="absolute top-4 right-4 opacity-0 group-hover:opacity-100 transition-opacity flex gap-2">
+                                            <button onClick={() => fileInputRefRef.current.click()} className="p-2 bg-black/60 rounded-full text-white hover:bg-zinc-700 backdrop-blur-md"><Upload size={16}/></button>
+                                        </div>
+                                    </div>
+                                    <span className="absolute bottom-0 text-[10px] uppercase tracking-widest bg-black/50 px-2 py-1 rounded text-white/50 backdrop-blur-sm">Reference Style</span>
+                                </div>
+                            ) : (
+                                <div className="absolute right-8 top-1/2 -translate-y-1/2 opacity-50 hover:opacity-100 transition-opacity">
+                                    <button onClick={() => fileInputRefRef.current.click()} className="flex flex-col items-center gap-3 p-6 border border-dashed border-zinc-700 rounded-2xl hover:border-indigo-500 hover:bg-zinc-900/50 transition-all group">
+                                        <div className="p-3 bg-zinc-900 rounded-full group-hover:bg-indigo-900/30 transition-colors"><Upload size={24} className="text-zinc-400 group-hover:text-indigo-400"/></div>
+                                        <span className="text-xs tracking-wider font-bold text-zinc-500 group-hover:text-indigo-300">添加风格参考图</span>
+                                    </button>
+                                </div>
+                            )}
+                        </div>
+
+                        {/* Control Panel */}
+                        <div className="absolute bottom-0 left-0 w-full h-48 bg-black border-t border-zinc-900 flex flex-col z-30">
+                            <div className="flex-1 overflow-hidden relative">
+                                {gradingMode === 'presets' ? (
+                                    <div ref={scrollContainerRef} className="absolute inset-0 flex items-center overflow-x-auto px-6 gap-4 filter-scrollbar">
+                                        <button onClick={() => fileInputTargetRef.current.click()} className="w-16 h-20 flex flex-col items-center justify-center border border-zinc-800 rounded text-zinc-500 hover:text-white hover:border-zinc-600 transition-all flex-shrink-0" title="打开"><Upload size={24} strokeWidth={1.5} /></button>
+                                        <button onClick={handleRefreshStyles} className="w-16 h-20 flex flex-col items-center justify-center border border-zinc-800 rounded text-indigo-400 hover:text-white hover:bg-indigo-900/20 hover:border-indigo-500/50 transition-all flex-shrink-0" title="换一批"><Shuffle size={24} strokeWidth={1.5} /></button>
+                                        <div className="w-[1px] h-12 bg-zinc-800 mx-2 flex-shrink-0"></div>
+                                        {/* 渲染生成的预设 */}
+                                        {suggestedStyles.map(style => (
+                                            <FilterCard key={style.id} style={style} imageSrc={targetSrc} isActive={selectedStyle?.id === style.id} onClick={() => applyStyle(style)} />
+                                        ))}
+                                    </div>
+                                ) : (
+                                    <div className="absolute inset-0 flex flex-col justify-center animate-glass-in">
+                                        <div className="px-8 mb-4 flex items-center gap-4">
+                                            <span className="text-[10px] w-8 text-right font-mono text-zinc-500">{filters[activeFilter]}</span>
+                                            <div className="flex-1 relative h-8 flex items-center group">
+                                                <input type="range" min={currentTool.min} max={currentTool.max} value={filters[activeFilter]} onChange={(e) => { setFilters({...filters, [activeFilter]: Number(e.target.value)}); setPreviewCSS({filter: getCSS({...filters, [activeFilter]: Number(e.target.value)})}); }} className="w-full h-1 bg-zinc-800 rounded-lg appearance-none cursor-pointer" />
+                                            </div>
+                                            <button onClick={resetFilters}><RotateCcw size={14} className="text-zinc-600 hover:text-white"/></button>
+                                        </div>
+                                        <div className="flex items-center justify-between px-8 overflow-x-auto scrollbar-hide gap-8">
+                                            {filterTools.map(tool => (<ToolButton key={tool.id} label={tool.label} icon={tool.icon} active={activeFilter === tool.id} onClick={() => setActiveFilter(tool.id)} />))}
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+
+                            {/* Intensity Slider */}
+                            {gradingMode === 'presets' && selectedStyle && (
+                                <div className="h-8 flex items-center px-8 border-t border-zinc-900/50">
+                                    <span className="text-[9px] uppercase tracking-widest text-zinc-500 w-12">强度</span>
+                                    <input 
+                                        type="range" min="0" max="100" value={filterIntensity} 
+                                        onChange={handleIntensityChange}
+                                        className="flex-1 h-1 bg-zinc-800 rounded-full appearance-none cursor-pointer"
+                                    />
+                                    <span className="text-[9px] font-mono text-zinc-400 w-8 text-right">{filterIntensity}%</span>
+                                </div>
+                            )}
+
+                            {/* Bottom Tab Bar */}
+                            <div className="h-10 border-t border-zinc-900 flex items-center justify-center gap-12 text-[10px] font-bold tracking-widest uppercase">
+                                <button onClick={() => setGradingMode('presets')} className={`h-full px-4 flex items-center gap-2 transition-colors ${gradingMode === 'presets' ? 'text-white' : 'text-zinc-600'}`}><Wand2 size={14} /> 滤镜库</button>
+                                <button onClick={() => setGradingMode('adjust')} className={`h-full px-4 flex items-center gap-2 transition-colors ${gradingMode === 'adjust' ? 'text-white' : 'text-zinc-600'}`}><Sliders size={14} /> 调节</button>
+                                <div className="w-[1px] h-4 bg-zinc-800"></div>
+                                <button onClick={handleDownload} className="h-full px-4 flex items-center gap-2 text-zinc-400 hover:text-white transition-colors"><Download size={14} /> 导出 CUBE</button>
+                            </div>
+                        </div>
+                    </main>
+                    {notification && <div className="fixed top-20 left-1/2 -translate-x-1/2 bg-white text-black px-4 py-2 rounded-full text-[10px] font-bold tracking-widest uppercase shadow-2xl z-50 animate-in slide-in-from-top-2 fade-in">{notification}</div>}
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
